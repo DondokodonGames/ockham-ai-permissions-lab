@@ -1,0 +1,43 @@
+
+name: Lab - App authentication check
+
+on:
+  push:
+    branches:
+      - lab/app-auth-check
+    paths:
+      - .github/workflows/app-auth-check.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify-app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Create scoped GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+        with:
+          client-id: ${{ secrets.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: DondokodonGames
+          repositories: ockham-ai-permissions-lab
+
+      - name: Verify token repository scope
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          EXPECTED: DondokodonGames/ockham-ai-permissions-lab
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(gh api /installation/repositories --jq '.repositories[].full_name')"
+
+          if [[ "$actual" != "$EXPECTED" ]]; then
+            echo "::error::Unexpected repository access"
+            exit 1
+          fi
+
+          echo "App authentication succeeded; repository scope is correct."
