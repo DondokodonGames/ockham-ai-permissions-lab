@@ -1,0 +1,66 @@
+
+name: Lab - Verify bot merge denied
+
+on:
+  push:
+    branches:
+      - lab/app-auth-check
+    paths:
+      - .github/workflows/app-merge-denied.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify-merge-denied:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+        with:
+          client-id: ${{ secrets.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: DondokodonGames
+          repositories: ockham-ai-permissions-lab
+
+      - name: Verify bot cannot merge approved PR
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: DondokodonGames/ockham-ai-permissions-lab
+        run: |
+          set -euo pipefail
+
+          state="$(gh api "repos/$REPO/pulls/1" --jq '.state')"
+          if [[ "$state" != "open" ]]; then
+            echo "::error::PR #1 is not open."
+            exit 1
+          fi
+
+          approval_count="$(gh api "repos/$REPO/pulls/1/reviews" \
+            --jq '[.[] | select(.state == "APPROVED" and .user.login == "DondokodonGames")] | length')"
+          if [[ "$approval_count" -lt 1 ]]; then
+            echo "::error::Human approval not found."
+            exit 1
+          fi
+
+          set +e
+          response="$(gh api -X PUT "repos/$REPO/pulls/1/merge" \
+            -f merge_method=squash 2>&1)"
+          result=$?
+          set -e
+
+          if [[ "$result" -eq 0 ]]; then
+            echo "::error::FAIL: Bot unexpectedly merged PR #1."
+            exit 1
+          fi
+
+          if grep -Eiq 'protected|ruleset|rule violation|not mergeable' <<< "$response"; then
+            echo "PASS: GitHub rejected the bot merge."
+          else
+            echo "::error::Rejected, but protection was not confirmed."
+            printf '%s\n' "$response"
+            exit 1
+          fi
