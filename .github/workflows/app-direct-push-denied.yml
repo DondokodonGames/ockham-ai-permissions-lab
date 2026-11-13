@@ -1,0 +1,77 @@
+
+name: Lab - Verify bot direct push denied
+
+on:
+  push:
+    branches:
+      - lab/app-auth-check
+    paths:
+      - .github/workflows/app-direct-push-denied.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify-direct-push-denied:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout main without saved credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Create scoped GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+        with:
+          client-id: ${{ secrets.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: DondokodonGames
+          repositories: ockham-ai-permissions-lab
+
+      - name: Verify bot direct push is blocked
+        shell: bash
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "Ockham AI Lab Bot"
+          git config user.email "lab-bot@users.noreply.github.com"
+          git commit --allow-empty -m "test: bot direct push probe"
+
+          askpass="$RUNNER_TEMP/lab-askpass.sh"
+          cat > "$askpass" <<'EOF'
+          #!/usr/bin/env bash
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "$APP_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          EOF
+          chmod 700 "$askpass"
+
+          set +e
+          output="$(GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
+            git -c credential.helper= push \
+            https://github.com/DondokodonGames/ockham-ai-permissions-lab.git \
+            HEAD:refs/heads/main 2>&1)"
+          status=$?
+          set -e
+
+          rm -f "$askpass"
+
+          if [[ "$status" -eq 0 ]]; then
+            echo "::error::FAIL: Bot pushed directly to main."
+            exit 1
+          fi
+
+          if grep -Eiq 'GH013|repository rule violations|protected ref|protected branch|restricted' <<< "$output"; then
+            echo "PASS: GitHub blocked bot direct push to main."
+          else
+            echo "::error::Push failed, but Ruleset rejection was not confirmed."
+            exit 1
+          fi
