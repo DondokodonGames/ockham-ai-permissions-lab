@@ -1,0 +1,56 @@
+
+name: Lab - Bot creates PR
+
+on:
+  push:
+    branches:
+      - lab/app-auth-check
+    paths:
+      - .github/workflows/app-pr-check.yml
+
+permissions:
+  contents: read
+
+jobs:
+  bot-pr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Create scoped GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+        with:
+          client-id: ${{ secrets.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: DondokodonGames
+          repositories: ockham-ai-permissions-lab
+
+      - name: Create test branch and PR as bot
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: DondokodonGames/ockham-ai-permissions-lab
+          BRANCH: lab/bot-pr-probe-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          base_sha="$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha')"
+
+          gh api -X POST "repos/$REPO/git/refs" \
+            -f ref="refs/heads/$BRANCH" \
+            -f sha="$base_sha" >/dev/null
+
+          content="$(printf 'Created by the Ockham AI lab bot.\n' | base64 -w0)"
+
+          gh api -X PUT "repos/$REPO/contents/lab-bot-proof.txt" \
+            -f message="test: bot writes to lab branch" \
+            -f content="$content" \
+            -f branch="$BRANCH" >/dev/null
+
+          gh api -X POST "repos/$REPO/pulls" \
+            -f title="[Lab] Verify bot PR creation" \
+            -f head="$BRANCH" \
+            -f base="main" \
+            -f body="Permission test only. Do not merge automatically." \
+            --jq '.html_url'
